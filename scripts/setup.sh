@@ -362,6 +362,44 @@ setupThirdPartyInstallationEnvironment()
 	fi
 }
 
+enableFips()
+{
+	echo "Enabling FIPS Mode"
+	sed -i '/security.provider.9/a \security.provider.10=sun.security.pkcs11.SunPKCS11 /nss.cfg' /$BWCE_HOME/tibco.home/*jre*/1*/lib/security/java.security
+	echo "Modified java.security file to add nss entry"
+	mkdir $BWCE_HOME/nss-db
+	echo "Creating NSS DB with password specified in nss.password file"
+	certutil -N -d $BWCE_HOME/nss-db -f /nss.password
+
+	echo "Adding certificates into NSS DB"
+	certsFolder=/resources/addons/certs
+	if [ -d ${certsFolder} ] && [ "$(ls $certsFolder)" ]; then 
+		
+		for name in $(find $certsFolder -type f); 
+		do	
+			# filter out hidden files
+			if [[ "$(basename $name )" != .* && "$(basename $name )" != *.jks ]]; then
+				pk12util -i $name -d $BWCE_HOME/nss-db -k /nss.password -w /certs.password 
+			fi
+		done
+	fi
+
+	echo "Listing Keys in NSS DB"
+	certutil -K -d $BWCE_HOME/nss-db -f /nss.password
+	echo "Created nss DB at $BWCE_HOME/nss-db"
+
+	echo "Enabling FIPS mode in NSS DB"
+	modutil -fips true -dbdir $BWCE_HOME/nss-db -force
+
+	echo "Checking FIPS mode in NSS DB"
+	modutil -chkfips true -dbdir $BWCE_HOME/nss-db
+
+	echo "Updating nss.cfg with path to NSS DB"
+	sed -i 's@#NSSDB#@'"$BWCE_HOME/nss-db"'@' /nss.cfg
+	
+	echo "FIPS Enabled for Container"
+}
+
 appnodeConfigFile=$BWCE_HOME/tibco.home/bw*/*/config/appnode_config.ini
 POLICY_ENABLED="false"
 checkJAVAHOME
@@ -404,6 +442,7 @@ fi
 checkProfile
 checkPolicy
 setupThirdPartyInstallationEnvironment
+enableFips
 
 if [ -f /*.substvar ]; then
 	cp -f /*.substvar $BWCE_HOME/tmp/pcf.substvar # User provided profile
